@@ -1,10 +1,10 @@
 vim.opt.termguicolors = true
-vim.cmd.colorscheme("habamax")
+vim.opt.background = "dark"
 -- ============================================================================
 -- OPTIONS
 -- ============================================================================
 vim.opt.number = true -- line number
-vim.opt.relativenumber = true -- relative line numbers
+-- vim.opt.relativenumber = true -- relative line numbers
 vim.opt.cursorline = true -- highlight current line
 vim.opt.wrap = false -- do not wrap lines by default
 vim.opt.scrolloff = 10 -- keep 10 lines above/below cursor
@@ -326,7 +326,6 @@ vim.api.nvim_create_autocmd("BufWritePre", {
 	pattern = {
 		"*.lua",
 		"*.py",
-		"*.go",
 		"*.js",
 		"*.jsx",
 		"*.ts",
@@ -404,6 +403,14 @@ vim.api.nvim_create_autocmd("BufReadPost", {
 		pcall(vim.api.nvim_win_set_cursor, 0, last_pos)
 	end,
 })
+-- golang formatting
+vim.api.nvim_create_autocmd("BufWritePre", {
+  group = augroup,
+  pattern = "*.go",
+  callback = function(args)
+    vim.lsp.buf.format({ bufnr = args.buf, async = false })
+  end,
+})
 
 -- wrap, linebreak and spellcheck on markdown and text files
 vim.api.nvim_create_autocmd("FileType", {
@@ -420,7 +427,9 @@ vim.api.nvim_create_autocmd("FileType", {
 -- ============================================================================
 -- PLUGINS (vim.pack)
 -- ============================================================================
-vim.pack.add({
+vim.pack.add({  
+'https://github.com/vague-theme/vague.nvim',
+  "https://github.com/oskarnurm/koda.nvim",
   "https://github.com/Mofiqul/vscode.nvim",
   "https://github.com/rose-pine/neovim",
   'https://github.com/vague-theme/vague.nvim',
@@ -565,7 +574,7 @@ require("mini.comment").setup({})
 require("mini.move").setup({})
 require("mini.surround").setup({})
 require("mini.cursorword").setup({})
-require("mini.indentscope").setup({})
+-- require("mini.indentscope").setup({})
 require("mini.pairs").setup({})
 require("mini.trailspace").setup({})
 require("mini.bufremove").setup({})
@@ -808,7 +817,7 @@ do
 		settings = {
 			languages = {
 				c = { clangfmt, cpplint },
-				go = { gofumpt, go_revive },
+				go = {  go_revive },
 				cpp = { clangfmt, cpplint },
 				css = { prettier_d },
 				html = { prettier_d },
@@ -958,13 +967,66 @@ vim.api.nvim_create_autocmd({ "InsertLeave", "TextChanged" }, {
     end
   end,
 })
-require("vscode").load()
-vim.cmd.colorscheme("vscode")
-require("rose-pine").setup({
-    variant = "moon", 
-  })
-vim.cmd.colorscheme('rose-pine')
+-- require("vscode").load()
+-- vim.cmd.colorscheme("vscode")
+-- require("rose-pine").setup({
+--     variant = "moon", 
+--   })
+-- vim.cmd("colorscheme koda")
+-- vim.cmd.colorscheme("tango")
+vim.cmd.colorscheme('vague')
 
 vim.opt.signcolumn = "yes" -- always show a sign column
 vim.opt.colorcolumn = "120" -- show a column at 120 position chars
 vim.api.nvim_set_hl(0, "ColorColumn", { bg = "#2a2a2a" })
+vim.lsp.config("gopls", {
+	settings = {
+		gopls = {
+			gofumpt = true,
+		},
+	},
+})
+
+vim.api.nvim_create_autocmd("BufWritePre", {
+	group = augroup,
+	pattern = "*.go",
+	callback = function(args)
+		if vim.bo[args.buf].buftype ~= "" then return end
+		if not vim.bo[args.buf].modifiable then return end
+
+		local clients = vim.lsp.get_clients({ bufnr = args.buf, name = "gopls" })
+		if #clients == 0 then
+			vim.notify("no gopls client", vim.log.levels.WARN)
+			return
+		end
+
+		local ok, err = pcall(function()
+			local params = vim.lsp.util.make_range_params(0, clients[1].offset_encoding)
+			params.context = { only = { "source.organizeImports" } }
+			local result = vim.lsp.buf_request_sync(args.buf, "textDocument/codeAction", params, 1000)
+			for client_id, res in pairs(result or {}) do
+				local client = vim.lsp.get_client_by_id(client_id)
+				for _, action in pairs(res.result or {}) do
+					if action.edit and client then
+						vim.lsp.util.apply_workspace_edit(action.edit, client.offset_encoding)
+					elseif action.command then
+						vim.lsp.buf.execute_command(action.command)
+					end
+				end
+			end
+		end)
+		if not ok then
+			vim.notify("organizeImports failed: " .. tostring(err), vim.log.levels.ERROR)
+		end
+
+		local fmt_ok, fmt_err = pcall(vim.lsp.buf.format, {
+			bufnr = args.buf,
+			async = false,
+			timeout_ms = 2000,
+			filter = function(c) return c.name == "gopls" end,
+		})
+		if not fmt_ok then
+			vim.notify("format failed: " .. tostring(fmt_err), vim.log.levels.ERROR)
+		end
+	end,
+})
